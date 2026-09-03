@@ -1,0 +1,20 @@
+# Exact pins for reproducible runs. Taken from the environment the reported numbers
+# were produced on. Install with:
+#   pip install -e ".[dev]" -c constraints.txt
+#
+# The gpu extra is deliberately not pinned. Torch and bitsandbytes builds are tied to
+# the CUDA version of whatever free-tier machine you land on, so pinning them would
+# break more often than it would help. Colab and Kaggle both ship a working torch.
+
+numpy==2.3.2
+scipy==1.16.2
+scikit-learn==1.7.2
+PyYAML==6.0.2
+requests==2.32.5
+
+# dev
+pytest==9.0.1
+pytest-cov==7.0.0
+hypothesis==6.167.1
+ruff==0.14.2
+mypy==2.3.1

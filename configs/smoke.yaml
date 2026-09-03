@@ -1,0 +1,57 @@
+# Smoke profile. No weights, no network, no GPU.
+# Runs the whole pipeline end to end in seconds so the plumbing can be checked
+# before anything expensive happens.
+
+profile: smoke
+tier: stub
+
+corpus:
+  synthetic: true
+  synthetic_seed: 3
+  target_restricted: 8
+  control_ratio: 1.0
+  sic_match_digits: 2
+
+sampling:
+  k: 4
+  temperature: 0.8
+  top_p: 0.95
+  top_k: 50
+  max_new_tokens: 64
+  base_seed: 20260101
+  topm_logprobs: 5
+
+split:
+  split_seed: 991
+  dev_fraction: 0.5
+
+stats:
+  bootstrap_resamples: 400
+  cv_folds: 3
+  cv_repeats: 3
+  permutation_draws: 200
+  fdr_q: 0.10
+  ci_level: 0.95
+  undetectable_threshold: 0.60
+  leak_curve_k: [1, 2, 4]
+
+methods:
+  - clean_reference
+  - none
+  - system_prompt
+  - retrieval_filter
+  - refusal_classifier
+  - lora_ga
+  - silentwall
+
+cache_layers:
+  - cache/smoke
+
+artifacts_dir: artifacts/smoke
+data_dir: data/smoke
+logs_dir: logs/smoke
+
+max_generations: 20000
+behavioural_templates: 8
+content_probes_per_family: 3
+template_pack_version: tp1

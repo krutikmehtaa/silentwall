@@ -1,0 +1,92 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "silentwall"
+version = "0.1.0"
+description = "Audit the detectability of information barriers in LLM agents"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Krutik Mehta" }]
+keywords = ["machine-unlearning", "llm-agents", "compliance", "information-barrier"]
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    "PyYAML>=6.0",
+    "requests>=2.31",
+]
+
+[project.optional-dependencies]
+gpu = [
+    "torch>=2.1",
+    "transformers>=4.40",
+    "accelerate>=0.28",
+    "peft>=0.10",
+    "bitsandbytes>=0.43",
+]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "hypothesis>=6.90",
+    "ruff>=0.4",
+    "mypy>=1.9",
+    "types-PyYAML",
+    "types-requests",
+]
+
+[project.scripts]
+silentwall = "silentwall.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+silentwall = ["py.typed"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RET", "PTH"]
+ignore = ["E501", "B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N802", "N803", "SLF001"]
+# X for a design matrix is the universal convention in scikit-learn code and
+# renaming it would make this harder to read, not easier.
+"src/silentwall/scoring/detector.py" = ["N803", "N806"]
+
+# transformers ships incomplete annotations for generate() and the tokenizer call,
+# so strict mode flags calls that are correct at runtime. This is the only module
+# that touches those APIs, which is the payoff for keeping model interaction behind
+# a single boundary. Every other module stays under full strict checking.
+[[tool.mypy.overrides]]
+module = "silentwall.backends.hf"
+disallow_untyped_calls = false
+warn_return_any = false
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_unreachable = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+files = ["src/silentwall"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "network: hits the live SEC EDGAR endpoint, excluded from CI",
+    "gpu: needs a CUDA device, excluded from CI",
+    "slow: long running simulation, excluded from CI",
+]
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.coverage.run]
+source = ["silentwall"]
