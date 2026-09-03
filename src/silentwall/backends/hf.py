@@ -27,13 +27,41 @@ from .base import BaseBackend, GenerationRequest
 
 __all__ = ["HfBackend", "TIER_SETTINGS"]
 
-#: dtype and quantization per tier. The 8B tier uses 4-bit NF4 because that is what
-#: makes a 7B to 8B model fit alongside activations in 16GB of free-tier accelerator.
+#: Quantization per tier. The 8B tier uses 4-bit NF4 because that is what makes a 7B to
+#: 8B model fit alongside activations in 16GB of free-tier accelerator.
+#:
+#: dtype is resolved at load time rather than fixed here, see pick_dtype. Hardcoding
+#: bfloat16 was a bug: a free Colab or Kaggle T4 is Turing, which has no native bf16, so
+#: it either falls back to slow paths or makes bitsandbytes complain. The correct dtype
+#: depends on the card you actually got, which is not knowable when this table is
+#: written.
 TIER_SETTINGS: dict[str, dict[str, Any]] = {
     "cpu-0p5b": {"quantize": None, "dtype": "float32", "device": "cpu"},
-    "gpu-1p5b": {"quantize": None, "dtype": "bfloat16", "device": "cuda"},
-    "gpu-8b-nf4": {"quantize": "nf4", "dtype": "bfloat16", "device": "cuda"},
+    "gpu-1p5b": {"quantize": None, "dtype": "auto", "device": "cuda"},
+    "gpu-8b-nf4": {"quantize": "nf4", "dtype": "auto", "device": "cuda"},
 }
+
+
+def pick_dtype(torch_mod: Any, requested: str) -> tuple[Any, str]:
+    """Choose a compute dtype the current device can actually run.
+
+    bfloat16 needs compute capability 8.0 or newer, meaning Ampere and later. That
+    covers A100, L4, and the Ada and Hopper cards. It does not cover the T4 that free
+    Colab and Kaggle hand out, which is Turing at 7.5, so float16 is the right answer
+    there.
+
+    Returns the torch dtype and a human readable name for logging.
+    """
+    if requested != "auto":
+        return getattr(torch_mod, requested), requested
+
+    if not torch_mod.cuda.is_available():
+        return torch_mod.float32, "float32"
+
+    major, minor = torch_mod.cuda.get_device_capability()
+    if major >= 8:
+        return torch_mod.bfloat16, "bfloat16"
+    return torch_mod.float16, "float16"
 
 
 class HfBackend(BaseBackend):
@@ -57,6 +85,7 @@ class HfBackend(BaseBackend):
         self.settings = TIER_SETTINGS[tier]
         self.batch_size = batch_size
         self.trust_remote_code = trust_remote_code
+        self.dtype_name = "unknown"
         self._logit_processors: list[Any] = []
 
         self._load()
@@ -82,7 +111,18 @@ class HfBackend(BaseBackend):
         self.tokenizer.padding_side = "left"
 
         kw: dict[str, Any] = {"trust_remote_code": self.trust_remote_code}
-        dtype = getattr(torch, self.settings["dtype"])
+        dtype, dtype_name = pick_dtype(torch, self.settings["dtype"])
+        self.dtype_name = dtype_name
+
+        if want_cuda:
+            name = torch.cuda.get_device_name(0)
+            major, minor = torch.cuda.get_device_capability()
+            print(f"gpu: {name}, compute capability {major}.{minor}, using {dtype_name}")
+            if major < 8 and self.settings["quantize"] == "nf4":
+                print(
+                    "note: this card predates Ampere, so 4-bit matmuls run without native "
+                    "bf16 support and throughput will be lower than the projection assumes"
+                )
 
         if self.settings["quantize"] == "nf4":
             from transformers import BitsAndBytesConfig
@@ -99,7 +139,7 @@ class HfBackend(BaseBackend):
             kw["torch_dtype"] = dtype
             if want_cuda:
                 kw["device_map"] = "auto"
-            print(f"loading model in {self.settings['dtype']}")
+            print(f"loading model in {dtype_name}")
 
         self.model = AutoModelForCausalLM.from_pretrained(self.model_id, **kw)
         self.model.eval()
@@ -111,7 +151,9 @@ class HfBackend(BaseBackend):
             print("model ready on cpu")
 
         self.set_fingerprint_extra("quantize", self.settings["quantize"])
-        self.set_fingerprint_extra("dtype", self.settings["dtype"])
+        # The resolved dtype, not the requested one. fp16 and bf16 give different
+        # generations, so a cache built on a T4 must not be reused on an A100.
+        self.set_fingerprint_extra("dtype", dtype_name)
         self.set_fingerprint_extra("tokenizer", getattr(self.tokenizer, "name_or_path", ""))
 
     def supports_logprobs(self) -> bool:
