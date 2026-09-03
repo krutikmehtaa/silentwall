@@ -433,9 +433,181 @@ print("seeds:", dict(r.seeds))
     ])
 
 
+def nb_colab() -> dict:
+    """Self-contained Colab runner. Clones, installs, runs, inspects, downloads."""
+    return notebook([
+        md("""
+# SILENTWALL on Colab
+
+Run the cells in order. Everything here is free tier.
+
+**Before you start**, set the runtime: Runtime, Change runtime type, Hardware
+accelerator, **T4 GPU**. Leave High-RAM off. Do not pick a TPU, the code is PyTorch
+CUDA and has no XLA path, so it will fail immediately.
+
+A100 and L4 appear in that menu but they consume paid compute units. The 1.5B run
+fits comfortably on a free T4.
+        """),
+        md("""
+## 1. Confirm you actually got a GPU
+
+Do this first. If it says `cuda: False` the accelerator did not attach, and you should
+re-save the runtime setting before spending time on anything else.
+        """),
+        code("""
+import torch
+
+print("cuda available:", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print("gpu:", torch.cuda.get_device_name(0))
+    print("compute capability:", torch.cuda.get_device_capability())
+    print("vram:", round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1), "GB")
+else:
+    print("no GPU attached. Runtime > Change runtime type > T4 GPU, then Save.")
+        """),
+        md("""
+Expect `Tesla T4`, capability `(7, 5)`, about `15.8 GB`.
+
+Capability 7.5 is Turing, which has no native bfloat16, so the code will select
+float16 automatically. On an A100 or L4 it selects bfloat16 instead.
+        """),
+        md("""
+## 2. Clone and install
+
+Torch, transformers and accelerate are already on Colab, so the plain install is
+enough. No Hugging Face token is needed anywhere: the model is Qwen, which is ungated.
+        """),
+        code("""
+!git clone -q https://github.com/krutikmehtaa/silentwall.git
+%cd silentwall
+!pip install -q -e .
+!python -m silentwall.cli --version
+        """),
+        md("""
+## 3. Free sanity check, no GPU, about 60 seconds
+
+This runs all six pipeline stages against a deterministic stub backend. It proves the
+plumbing works in this environment before any model weights are involved.
+
+Two things to look for in the table. `clean_reference` must show leak `0.000`, because
+an agent that never held the data cannot leak it. And its AUC should sit near 0.5,
+because there is nothing to detect. If either is wrong, stop, because nothing
+downstream will mean anything.
+        """),
+        code("""
+!python -m silentwall.cli sweep -c configs/smoke.yaml --quiet
+        """),
+        md("""
+## 4. See the cost before spending it
+
+Generates nothing. Counts the work, counts what is already cached, projects the time.
+        """),
+        code("""
+!python -m silentwall.cli plan -c configs/iterate.yaml
+        """),
+        md("""
+## 5. The real run
+
+29,760 generations across 6 methods at 1.5B. Roughly **1 to 3 hours**.
+
+The first method spends 5 to 10 minutes downloading about 3GB of Qwen weights before
+it generates anything, so early silence is normal.
+
+Keep this browser tab active. Free Colab disconnects on idle. A disconnect costs you
+the session but not the work, because every generation is flushed to the cache as it
+is produced. Rerunning resumes.
+        """),
+        code("""
+!python -m silentwall.cli sweep -c configs/iterate.yaml --confirm-budget
+        """),
+        md("""
+## 6. Check the three things that matter
+
+This is the first time the GPU code path has executed anywhere, so treat this as a
+debugging pass as much as an experiment.
+        """),
+        code("""
+import json
+from pathlib import Path
+
+results = [json.loads(p.read_text()) for p in sorted(Path("outputs").glob("audit_*.json"))]
+
+print("CHECK 1: clean_reference must leak nothing")
+for r in results:
+    if r["method_id"] == "clean_reference":
+        worst = max((x["leak_at_k"]["point"] for x in r["leak"]), default=0.0)
+        print(f"  leak {worst:.3f}", "PASS" if worst < 0.02 else "FAIL, investigate before trusting anything else")
+
+print()
+print("CHECK 2: entropy features must be populated, not missing")
+for r in results:
+    det = next((d for d in r["detectability"] if d["detector_id"] == "logreg_primary"), None)
+    if det and det["feature_importance"]:
+        have = [k for k in det["feature_importance"] if "entropy" in k or "logprob" in k]
+        print(f"  {r['method_id']:20s} logprob features present: {len(have)}")
+        break
+else:
+    print("  no detectability estimate found")
+
+print()
+print("CHECK 3: suppression methods should be detectable")
+for r in results:
+    det = next((d for d in r["detectability"] if d["detector_id"] == "logreg_primary"), None)
+    if det:
+        a = det["auc"]
+        print(f"  {r['method_id']:20s} AUC {a['point']:.3f} [{a['lo']:.3f}, {a['hi']:.3f}]  pairs={det['n_pairs']}")
+        """),
+        md("""
+What the checks mean.
+
+**Check 1 fails** means Qwen knows something about these companies from pretraining
+that the stub could not, or the substrate is leaking. Either way it invalidates the
+comparison until understood.
+
+**Check 2 shows 0 features** means logprob extraction from `generate()` is broken and
+three of the twelve behavioural features are dead. This is the most likely first bug.
+
+**Check 3**: `refusal_classifier` and `system_prompt` should show high AUC. If they
+collapse toward 0.5, the refusal cue lexicon in `scoring/features.py` does not match
+how Qwen actually phrases refusals and needs adjusting against real output.
+        """),
+        md("""
+## 7. Read the comparison table
+        """),
+        code("""
+from IPython.display import Markdown, display
+
+display(Markdown(Path("outputs/comparison.md").read_text()))
+        """),
+        md("""
+## 8. Download before the session ends
+
+Take the cache too. It is what makes the next run resume instead of regenerating, and
+it is the difference between minutes and hours if you come back to this.
+        """),
+        code("""
+!zip -qr silentwall_outputs.zip outputs cache
+
+from google.colab import files
+files.download("silentwall_outputs.zip")
+        """),
+        md("""
+## If something failed
+
+Paste the error back into the chat. The likely candidates, in order:
+
+- logprob extraction in `backends/hf.py`, see Check 2
+- refusal lexicon in `scoring/features.py`, see Check 3
+- CUDA out of memory, in which case the backend halves the batch and retries, then
+  defers the unit and continues. Lower `sampling.max_new_tokens` if it persists.
+        """),
+    ])
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     books = {
+        "00_colab_run.ipynb": nb_colab(),
         "01_build_corpus.ipynb": nb_01(),
         "02_probes.ipynb": nb_02(),
         "03_baselines.ipynb": nb_03(),
