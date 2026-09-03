@@ -35,10 +35,13 @@ __all__ = ["HfBackend", "TIER_SETTINGS"]
 #: it either falls back to slow paths or makes bitsandbytes complain. The correct dtype
 #: depends on the card you actually got, which is not knowable when this table is
 #: written.
+#: batch_size is a per-tier default rather than one number for everything, and it is
+#: deliberately absent from the fingerprint: it changes throughput, not output, so
+#: raising it must not invalidate a cache that took hours to fill.
 TIER_SETTINGS: dict[str, dict[str, Any]] = {
-    "cpu-0p5b": {"quantize": None, "dtype": "float32", "device": "cpu"},
-    "gpu-1p5b": {"quantize": None, "dtype": "auto", "device": "cuda"},
-    "gpu-8b-nf4": {"quantize": "nf4", "dtype": "auto", "device": "cuda"},
+    "cpu-0p5b": {"quantize": None, "dtype": "float32", "device": "cpu", "batch_size": 4},
+    "gpu-1p5b": {"quantize": None, "dtype": "auto", "device": "cuda", "batch_size": 32},
+    "gpu-8b-nf4": {"quantize": "nf4", "dtype": "auto", "device": "cuda", "batch_size": 16},
 }
 
 
@@ -69,7 +72,7 @@ class HfBackend(BaseBackend):
         self,
         tier: str,
         model_id: str | None = None,
-        batch_size: int = 8,
+        batch_size: int | None = None,
         trust_remote_code: bool = False,
     ) -> None:
         super().__init__()
@@ -83,7 +86,7 @@ class HfBackend(BaseBackend):
         self.tier = tier
         self.model_id = model_id or TIER_MODELS[tier]
         self.settings = TIER_SETTINGS[tier]
-        self.batch_size = batch_size
+        self.batch_size = batch_size or int(self.settings.get("batch_size", 8))
         self.trust_remote_code = trust_remote_code
         self.dtype_name = "unknown"
         self._logit_processors: list[Any] = []
@@ -250,14 +253,22 @@ class HfBackend(BaseBackend):
         sequences = result.sequences[:, prompt_len:]
         scores = result.scores  # tuple over steps, each (batch, vocab)
 
+        # One transfer for the whole batch rather than per token. Everything below this
+        # line is plain Python over host lists, so there are no further device syncs.
+        pad_id = self.tokenizer.pad_token_id
+        seq_host = sequences.cpu().tolist()
+        all_token_ids = [[int(t) for t in row if int(t) != pad_id] for row in seq_host]
+        lengths = [len(ids) for ids in all_token_ids]
+
+        decoded_batch = self.tokenizer.batch_decode(all_token_ids, skip_special_tokens=True)
+        traces = self._extract_traces(scores, sequences, lengths, sampling.topm_logprobs)
+
         gens: list[Generation] = []
         for row, req in enumerate(reqs):
-            token_ids = [int(t) for t in sequences[row] if int(t) != self.tokenizer.pad_token_id]
-            decoded = self.tokenizer.decode(token_ids, skip_special_tokens=True)
-            text = (decoded if isinstance(decoded, str) else str(decoded)).strip()
-            trace = self._extract_trace(
-                scores, sequences, row, len(token_ids), sampling.topm_logprobs
-            )
+            token_ids = all_token_ids[row]
+            raw = decoded_batch[row]
+            text = (raw if isinstance(raw, str) else str(raw)).strip()
+            trace = traces[row]
 
             gens.append(
                 Generation(
@@ -278,27 +289,64 @@ class HfBackend(BaseBackend):
             )
         return gens
 
-    def _extract_trace(
-        self, scores: Any, sequences: Any, row: int, n_tokens: int, topm: int
-    ) -> TokenTrace | None:
-        if not scores or n_tokens == 0:
-            return None
+    def _extract_traces(
+        self, scores: Any, sequences: Any, lengths: Sequence[int], topm: int
+    ) -> list[TokenTrace | None]:
+        """Logprobs for a whole batch, computed on device with one transfer at the end.
+
+        The first version walked tokens in a Python loop and called float() on a device
+        tensor per token. Each of those forces a GPU to CPU synchronization, so a batch
+        of 8 sequences at 96 tokens performed 768 blocking syncs and burned about ten
+        seconds per work unit doing almost no arithmetic. Measured throughput was 0.81
+        generations per second against a projection of twelve.
+
+        Two changes. Everything is a batched tensor operation, and there is exactly one
+        device to host transfer per batch. And log_softmax over the full vocabulary is
+        replaced by logsumexp plus a subtraction, which is the same quantity without
+        materializing a normalized tensor as wide as the vocabulary at every step.
+        Qwen's vocabulary is 151,936, so those tensors were the bulk of the traffic.
+        """
+        if not scores or not lengths:
+            return [None] * len(lengths)
+
         torch = self._torch
-        chosen: list[float] = []
-        topm_rows: list[tuple[float, ...]] = []
+        n_steps = len(scores)
+        m = min(topm, int(scores[0].shape[-1]))
 
-        for step in range(min(n_tokens, len(scores))):
-            logits = scores[step][row]
-            logprobs = torch.log_softmax(logits.float(), dim=-1)
-            tok = int(sequences[row, step])
-            chosen.append(float(logprobs[tok]))
-            top = torch.topk(logprobs, k=min(topm, logprobs.shape[-1]))
-            topm_rows.append(tuple(float(x) for x in top.values))
+        with torch.no_grad():
+            # (batch, steps, vocab), kept in the model dtype. Only reductions upcast.
+            stacked = torch.stack(scores, dim=1)
+            lse = torch.logsumexp(stacked.float(), dim=-1)  # (batch, steps)
 
-        ids = tuple(int(sequences[row, s]) for s in range(min(n_tokens, len(scores))))
-        return TokenTrace(
-            token_ids=ids, chosen_logprobs=tuple(chosen), topm_logprobs=tuple(topm_rows)
-        )
+            top_values, _ = torch.topk(stacked, k=m, dim=-1)  # (batch, steps, m)
+            top_lp = top_values.float() - lse.unsqueeze(-1)
+
+            ids = sequences[:, :n_steps]
+            chosen_lp = torch.gather(stacked.float(), 2, ids.unsqueeze(-1)).squeeze(-1) - lse
+
+            # the single transfer
+            top_host = top_lp.cpu().tolist()
+            chosen_host = chosen_lp.cpu().tolist()
+            ids_host = ids.cpu().tolist()
+
+            del stacked, lse, top_values, top_lp, chosen_lp
+
+        out: list[TokenTrace | None] = []
+        for row, n_tok in enumerate(lengths):
+            keep = min(n_tok, n_steps)
+            if keep == 0:
+                out.append(None)
+                continue
+            out.append(
+                TokenTrace(
+                    token_ids=tuple(int(t) for t in ids_host[row][:keep]),
+                    chosen_logprobs=tuple(float(x) for x in chosen_host[row][:keep]),
+                    topm_logprobs=tuple(
+                        tuple(float(v) for v in step) for step in top_host[row][:keep]
+                    ),
+                )
+            )
+        return out
 
 
 def _parse_tool_calls(text: str) -> list[str]:
