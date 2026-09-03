@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from typing import Any
 
 from ..errors import BackendOOMError, ConfigError
+from ..hashing import stable_seed
 from ..types import Generation, TokenTrace
 from .base import BaseBackend, GenerationRequest
 
@@ -220,9 +221,13 @@ class HfBackend(BaseBackend):
         enc = {k: v.to(self.model.device) for k, v in enc.items()}
 
         sampling = reqs[0].sampling
-        # One seed per batch. Per-sample determinism still holds because sample_index
-        # feeds the request seed and each sample_index lands in its own request.
-        torch.manual_seed(reqs[0].seed)
+        # Seed from every request in the batch rather than just the first. Batches now
+        # span probes, so seeding on reqs[0] alone would make the RNG state depend on
+        # which probe happened to land at position zero. This is still not exact
+        # per-sample reproducibility on GPU, because batch membership perturbs both RNG
+        # consumption and fp16 padding, and that limitation is reported rather than
+        # papered over.
+        torch.manual_seed(stable_seed(*[r.seed for r in reqs]) % (2**31))
 
         processors = LogitsProcessorList(self._logit_processors) if self._logit_processors else None
 
