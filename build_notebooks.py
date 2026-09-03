@@ -478,10 +478,29 @@ Torch, transformers and accelerate are already on Colab, so the plain install is
 enough. No Hugging Face token is needed anywhere: the model is Qwen, which is ungated.
         """),
         code("""
-!git clone -q https://github.com/krutikmehtaa/silentwall.git
-%cd silentwall
+# Clones on a fresh runtime, pulls if a clone is already there. Reopening the notebook
+# creates a new session but sometimes reuses a live runtime, and a bare `git clone`
+# fails with "destination path already exists" in that case.
+!if [ -d /content/silentwall/.git ]; then cd /content/silentwall && git pull -q && echo "pulled into existing clone"; else git clone -q https://github.com/krutikmehtaa/silentwall.git /content/silentwall && echo "fresh clone"; fi
+
+%cd /content/silentwall
 !pip install -q -e .
 !python -m silentwall.cli --version
+        """),
+        md("""
+`pip install -e .` is an editable install, so if you ever need to take a code update
+mid-session, `!git pull` is enough on its own. No reinstall.
+        """),
+        md("""
+### Did a previous run leave a cache behind?
+
+Generations are cached, so a rerun skips work already done. Colab disk is ephemeral, so
+this survives an interrupted cell but not a disconnected runtime.
+        """),
+        code("""
+!ls /content/silentwall/cache/iterate 2>/dev/null | head -3 || true
+!echo "---"
+!find /content/silentwall/cache -name '*.jsonl.gz' 2>/dev/null | wc -l | xargs -I{} echo "cache shards found: {}"
         """),
         md("""
 ## 3. Free sanity check, no GPU, about 60 seconds
