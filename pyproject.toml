@@ -56,6 +56,14 @@ src = ["src", "tests"]
 select = ["E", "F", "W", "I", "N", "UP", "B", "C4", "SIM", "RET", "PTH"]
 ignore = ["E501", "B008"]
 
+[tool.ruff.lint.isort]
+# Declared explicitly rather than inferred from `src`. Ruff's first-party inference
+# depends on how the package happens to be resolvable in the current environment, so it
+# classified silentwall as first-party locally and third-party in CI, and the import
+# order that passed on one failed on the other. A lint result should not depend on
+# whether something is installed.
+known-first-party = ["silentwall"]
+
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["N802", "N803", "SLF001"]
 # X for a design matrix is the universal convention in scikit-learn code and

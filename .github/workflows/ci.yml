@@ -36,5 +36,8 @@ jobs:
       - name: Test
         run: pytest -m "not network and not gpu and not slow" --cov=silentwall --cov-report=term-missing
 
+      # Module form, not the bare `silentwall` script. The console script lands in a
+      # Scripts directory that is not always on PATH, and a green CI that silently
+      # skipped the end-to-end check would be worse than no check.
       - name: Smoke pipeline
-        run: silentwall sweep --config configs/smoke.yaml --quiet
+        run: python -m silentwall.cli sweep --config configs/smoke.yaml --quiet

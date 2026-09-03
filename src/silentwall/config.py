@@ -253,7 +253,9 @@ def _as_list(key: str, value: Any) -> list[Any]:
         return parts
     if isinstance(value, list | tuple):
         return list(value)
-    raise ConfigError(f"{key} must be a list or a comma separated string, got {type(value).__name__}")
+    raise ConfigError(
+        f"{key} must be a list or a comma separated string, got {type(value).__name__}"
+    )
 
 
 def _apply_dotted(target: dict[str, Any], dotted: str, value: Any) -> None:

@@ -172,8 +172,7 @@ def execute_units(
 
         if verbose and (n % 50 == 0 or n == len(units)):
             print(
-                f"  {n}/{len(units)} units, {stats.generated} generated, "
-                f"{stats.from_cache} cached"
+                f"  {n}/{len(units)} units, {stats.generated} generated, {stats.from_cache} cached"
             )
 
     if verbose and stats.deferred:
