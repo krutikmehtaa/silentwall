@@ -14,11 +14,14 @@ venv/
 .coverage
 htmlcov/
 
-artifacts/
-cache/
-logs/
-data/
-outputs/
+# Leading slash anchors these to the repository root. Without it, `cache/` also
+# matched src/silentwall/cache/, so the entire cache subpackage was silently excluded
+# from the repo and CI failed with ModuleNotFoundError on a module that exists locally.
+/artifacts/
+/cache/
+/logs/
+/data/
+/outputs/
 
 .ipynb_checkpoints/
 .DS_Store
