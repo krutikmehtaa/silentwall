@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from silentwall.config import SilentwallConfig, load_config
-from silentwall.containment.base import BaseContainment, EntityContext
+from silentwall.containment.base import BaseContainment
 from silentwall.containment.registry import REGISTRY, available, register
 from silentwall.errors import BudgetExceededError
 from silentwall.pipeline import prepare_workspace, run_method
