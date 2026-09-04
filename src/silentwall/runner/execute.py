@@ -206,7 +206,9 @@ def _execute_batched(
             hit = ctx.cache.get(key)
             if hit is not None:
                 stats.from_cache += 1
-                by_unit.setdefault(unit.unit_id, []).append(ctx.method.post_generate(hit, ectx))
+                by_unit.setdefault(unit.unit_id, []).append(
+                    ctx.method.post_generate(hit, ectx, req)
+                )
             else:
                 pending.append((key, req, ectx, unit.unit_id))
 
@@ -240,7 +242,7 @@ def _execute_batched(
             )
             ctx.cache.put(stamped)
             stats.generated += 1
-            by_unit.setdefault(uid, []).append(ctx.method.post_generate(stamped, ectx))
+            by_unit.setdefault(uid, []).append(ctx.method.post_generate(stamped, ectx, _req))
 
         done += len(chunk)
         if verbose and (done % (batch_size * 20) < batch_size or done >= len(pending)):

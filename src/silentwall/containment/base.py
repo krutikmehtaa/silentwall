@@ -65,7 +65,9 @@ class ContainmentMethod(Protocol):
     def filter_context(
         self, docs: Sequence[RetrievedDoc], ctx: EntityContext
     ) -> Sequence[RetrievedDoc]: ...
-    def post_generate(self, gen: Generation, ctx: EntityContext) -> Generation: ...
+    def post_generate(
+        self, gen: Generation, ctx: EntityContext, req: GenerationRequest | None = None
+    ) -> Generation: ...
     def fingerprint(self) -> str: ...
 
 
@@ -98,7 +100,9 @@ class BaseContainment:
     ) -> Sequence[RetrievedDoc]:
         return docs
 
-    def post_generate(self, gen: Generation, ctx: EntityContext) -> Generation:
+    def post_generate(
+        self, gen: Generation, ctx: EntityContext, req: GenerationRequest | None = None
+    ) -> Generation:
         return gen
 
     def fingerprint(self) -> str:

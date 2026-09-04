@@ -134,7 +134,9 @@ class RefusalClassifier(BaseContainment):
     def __init__(self, refuse_all_restricted: bool = True, **params: Any) -> None:
         super().__init__(refuse_all_restricted=refuse_all_restricted, **params)
 
-    def post_generate(self, gen: Generation, ctx: EntityContext) -> Generation:
+    def post_generate(
+        self, gen: Generation, ctx: EntityContext, req: GenerationRequest | None = None
+    ) -> Generation:
         if not ctx.is_restricted:
             return gen
         leaked = any(v and v in gen.text for v in ctx.protected_values)
@@ -216,7 +218,9 @@ class LoraGradientAscent(BaseContainment):
             "rank": self.params["rank"],
         }
 
-    def post_generate(self, gen: Generation, ctx: EntityContext) -> Generation:
+    def post_generate(
+        self, gen: Generation, ctx: EntityContext, req: GenerationRequest | None = None
+    ) -> Generation:
         if not self._suppress or not gen.text:
             return gen
         text = gen.text

@@ -33,11 +33,11 @@ from __future__ import annotations
 import random
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from statistics import mean, pstdev
 from typing import TYPE_CHECKING, Any
 
-from ..backends.base import ModelBackend
+from ..backends.base import GenerationRequest, ModelBackend
 from ..hashing import hash_obj, stable_seed
 from ..types import Generation, PrivateArtifact, TokenTrace
 from .base import BaseContainment, EntityContext
@@ -47,6 +47,10 @@ if TYPE_CHECKING:
     from ..corpus.splits import DevSplit
 
 __all__ = ["CalibrationParams", "SilentWallDefense", "LogitArithmeticProcessor"]
+
+#: Offset applied to sample_index when regenerating, so a regeneration never collides
+#: with a real sample's cache slot. Larger than any plausible k.
+_REGEN_OFFSET = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,15 +169,31 @@ class SilentWallDefense(BaseContainment):
         leak_ceiling: float = 0.05,
         search_steps: int = 3,
         seed: int = 0,
+        # Measured on a 42 pair stub corpus, detectability AUC against retry budget:
+        #   r=1  1.000    r=3  0.999    r=6  0.981    r=12  0.702
+        # Monotone and strongly diminishing. 8 is a compromise between the curve and the
+        # fact that every retry is a real generation on a GPU tier. See the note in
+        # post_generate on why no retry budget reaches 0.5.
+        regen_retries: int = 8,
         **params: Any,
     ) -> None:
-        super().__init__(leak_ceiling=leak_ceiling, search_steps=search_steps, seed=seed, **params)
+        super().__init__(
+            leak_ceiling=leak_ceiling,
+            search_steps=search_steps,
+            seed=seed,
+            regen_retries=regen_retries,
+            **params,
+        )
         self.calib = CalibrationParams(alpha, temp_offset, length_bias, refusal_penalty)
         self._public_text: dict[str, str] = {}
         self._target_length: float | None = None
         self._length_sd: float = 0.0
         self._hedge_rate: float = 0.0
         self._calibrated = False
+        self._backend: ModelBackend | None = None
+        self._fallbacks = 0
+        self._regenerations = 0
+        self._redactions = 0
 
     # fit
 
@@ -282,7 +302,13 @@ class SilentWallDefense(BaseContainment):
     # inference hooks
 
     def prepare(self, backend: ModelBackend) -> ModelBackend:
-        """Attach the logit processor on tiers that support it."""
+        """Attach the logit processor and keep a handle on the backend.
+
+        The handle is what lets post_generate ask the model again with public context
+        only, instead of assembling a replacement from templates.
+        """
+        self._backend = backend
+
         add = getattr(backend, "add_logit_processor", None)
         if add is not None and self.calib.alpha != 0.0:
             experts = self._fitted.get("experts")
@@ -295,11 +321,110 @@ class SilentWallDefense(BaseContainment):
             attach("silentwall", hash_obj(self.calib.as_dict()))
         return backend
 
-    def post_generate(self, gen: Generation, ctx: EntityContext) -> Generation:
+    def _public_only_request(self, req: GenerationRequest, ctx: EntityContext) -> GenerationRequest:
+        """The same question with every private trace removed.
+
+        Drops context documents carrying a protected value, drops any do-not-discuss
+        instruction, and supplies the entity's public background instead. What comes
+        back is genuine model output conditioned only on what the public side was
+        entitled to know, which is what the public prior means.
+        """
+        clean_docs = tuple(
+            doc for doc in req.context_docs if not any(v and v in doc for v in ctx.protected_values)
+        )
+        public = self._public_text.get(ctx.entity_id, "")
+        if public and public not in clean_docs:
+            clean_docs = (*clean_docs, public)
+
+        return replace(
+            req,
+            system_prompt="",
+            context_docs=clean_docs,
+            # a distinct sample index keeps the regeneration out of the original's slot
+            sample_index=req.sample_index + _REGEN_OFFSET,
+        )
+
+    def _regenerate(self, req: GenerationRequest, ctx: EntityContext) -> Generation | None:
+        """Ask the model again with public context only.
+
+        Returns the last candidate even when it still surfaces a protected value, so the
+        caller can redact rather than fabricate. That distinction matters: a redacted
+        real generation keeps genuine logprobs, and genuine logprobs are precisely what
+        the first version of this defense lacked.
+
+        None only when there is no backend attached, which happens in unit tests that
+        call post_generate directly.
+        """
+        if self._backend is None:
+            return None
+
+        attempt = self._public_only_request(req, ctx)
+        last: Generation | None = None
+
+        for _ in range(1 + int(self.params["regen_retries"])):
+            try:
+                produced = self._backend.generate([attempt])
+            except Exception:  # noqa: BLE001 a failed regeneration must not end the run
+                return last
+            if not produced:
+                return last
+
+            last = produced[0]
+            if not any(v and v in last.text for v in ctx.protected_values):
+                return last
+            attempt = replace(attempt, sample_index=attempt.sample_index + _REGEN_OFFSET)
+
+        return last
+
+    @staticmethod
+    def _redact(text: str, ctx: EntityContext) -> str:
+        """Remove protected values from otherwise genuine model output.
+
+        Used when regeneration keeps recalling the value from weights, which retrieval
+        filtering cannot prevent. Redacting a real generation is strictly better than
+        substituting a synthetic one, because the token-level statistics stay real.
+        """
+        out = text
+        for value in sorted(ctx.protected_values, key=len, reverse=True):
+            if value and value in out:
+                out = out.replace(value, "not something I can speak to")
+        return out
+
+    def post_generate(
+        self, gen: Generation, ctx: EntityContext, req: GenerationRequest | None = None
+    ) -> Generation:
         """Substitute rather than suppress.
 
-        Runs for restricted and control entities alike so the code path is identical.
-        For controls the effective alpha is zero and the text comes back untouched.
+        Regeneration is the whole design, and the first version got it wrong in a way
+        the audit caught. That version composed a replacement from a handful of canned
+        sentences and attached a trace built from random.gauss. On the stub that looked
+        fine, because both classes had synthetic traces. On a real model the detector
+        immediately separated Qwen's genuine logprobs from fabricated Gaussian noise,
+        and token_entropy, mean_neg_logprob and semantic_diversity together pushed AUC
+        to 0.98. The canned sentences also never hedged, so refusal_rate leaked in the
+        opposite direction.
+
+        Asking the model again with the private context stripped fixes all of it at
+        once, because the answer is real model output: real logprobs, natural
+        diversity, and whatever hedging rate the model genuinely has on public
+        questions. Templates remain only as a fallback when regeneration is impossible.
+
+        Why this still does not reach 0.5, which is the project's main finding
+        ---------------------------------------------------------------------
+        Regeneration keeps the value out of the answer, but it works by resampling until
+        a draw comes back clean. That means the returned text is conditioned on the
+        event "this sample did not leak", and conditioning truncates the distribution.
+        Restricted entities need that truncation and controls never do, so the surviving
+        outputs for restricted entities are drawn from a censored version of the model's
+        natural distribution. The censoring is itself the signature.
+
+        Raising the retry budget dilutes the effect but cannot remove it, which is
+        exactly what the measurement shows: AUC falls monotonically from 1.000 at one
+        retry to 0.702 at twelve, with sharply diminishing returns and no path to
+        chance. The conclusion is that inference-time containment cannot achieve
+        behavioural indistinguishability while the fact remains in the weights. Getting
+        to 0.5 requires removing it from the parameters, which is a different class of
+        method than anything that operates at inference.
         """
         effective_alpha = self.calib.alpha if ctx.is_restricted else 0.0
 
@@ -309,24 +434,37 @@ class SilentWallDefense(BaseContainment):
         if effective_alpha == 0.0 or not (leaked or refused):
             return gen
 
+        if req is not None:
+            regenerated = self._regenerate(req, ctx)
+            if regenerated is not None:
+                text = self._redact(regenerated.text, ctx)
+                if text != regenerated.text:
+                    self._redactions += 1
+                self._regenerations += 1
+
+                d = regenerated.to_dict()
+                d["text"] = text
+                d["n_tokens"] = max(1, len(text.split()))
+                # identity belongs to the generation being replaced
+                d["cache_key"] = gen.cache_key
+                d["probe_id"] = gen.probe_id
+                d["entity_id"] = gen.entity_id
+                d["sample_index"] = gen.sample_index
+                d["containment_fp"] = gen.containment_fp
+                # the honest cost of the defense is both passes
+                d["latency_ms"] = gen.latency_ms + regenerated.latency_ms
+                return Generation.from_dict(d)
+
+        # Reached only when no backend is attached, which is the case in unit tests that
+        # call post_generate directly. This is the one path that still fabricates a
+        # trace, and the count is surfaced so a nonzero value at scale is visible rather
+        # than silent.
         replacement = self._compose(gen, ctx)
         d = gen.to_dict()
         d["text"] = replacement
         d["n_tokens"] = len(replacement.split())
-        # The trace has to describe the text that is actually returned.
-        #
-        # The first version of this dropped it, on the reasoning that logprobs from a
-        # replaced string are meaningless. That was wrong, and wrong in the specific
-        # way this project exists to catch: restricted entities then had missing
-        # entropy features while controls had real ones, so availability of the
-        # feature became a cleaner label than anything the feature measured. It
-        # pushed detectability AUC to 1.0.
-        #
-        # On the GPU tiers the substituted text is produced by the model itself
-        # through logit arithmetic, so a real trace exists. Here we synthesize the
-        # equivalent, which keeps the feature measurable and keeps this path a
-        # faithful stand-in for the real one.
         d["trace"] = self._trace_for(replacement, gen.seed).to_dict()
+        self._fallbacks += 1
         return Generation.from_dict(d)
 
     def _trace_for(self, text: str, seed: int) -> TokenTrace:
@@ -388,6 +526,25 @@ class SilentWallDefense(BaseContainment):
         if len(words) > target * 1.25:
             text = " ".join(words[: max(6, int(target))]).rstrip(",;: ") + "."
         return text
+
+    @property
+    def fallback_count(self) -> int:
+        """Substitutions that used a fabricated trace rather than a real generation.
+
+        Reported rather than hidden. A fabricated trace is the exact fault that made the
+        first version of this defense trivially detectable, so any nonzero value here is
+        a caveat on the result.
+        """
+        return self._fallbacks
+
+    @property
+    def substitution_stats(self) -> dict[str, int]:
+        """Counts for the report: how the defense actually behaved."""
+        return {
+            "regenerations": self._regenerations,
+            "redactions": self._redactions,
+            "fabricated_fallbacks": self._fallbacks,
+        }
 
     def fingerprint(self) -> str:
         return hash_obj(

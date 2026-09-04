@@ -81,7 +81,7 @@ def test_a_method_defined_in_a_test_module_works(workspace) -> None:  # type: ig
     class ShoutyContainment(BaseContainment):
         id = "test_only_shouty"
 
-        def post_generate(self, gen: Generation, ctx: EntityContext) -> Generation:
+        def post_generate(self, gen, ctx, req=None):  # type: ignore[no-untyped-def]
             if not ctx.is_restricted:
                 return gen
             d = gen.to_dict()
