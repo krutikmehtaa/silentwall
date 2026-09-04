@@ -756,10 +756,143 @@ FileLink("silentwall_default_outputs.zip")
     ])
 
 
+def nb_colab_pro() -> dict:
+    """Colab Pro runner on A100. The fastest free-ish path to the headline result."""
+    return notebook([
+        md("""
+# SILENTWALL: headline run on Colab Pro A100
+
+Runtime: **A100 GPU**. Set it before running anything.
+
+Runtime, Change runtime type, A100 GPU, Save.
+
+A100 is Ampere (compute capability 8.0), has native bf16 tensor cores, and runs 7B
+4-bit inference at roughly 10 to 15 generations per second. The full six-method sweep
+at 60 companies finishes in about **1.5 to 2.5 hours**.
+        """),
+        md("## 1. Confirm the GPU"),
+        code("""
+import torch
+assert torch.cuda.is_available(), "no GPU, set Runtime > A100 GPU first"
+name = torch.cuda.get_device_name(0)
+cap = torch.cuda.get_device_capability()
+vram = round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1)
+print(f"gpu: {name}, capability {cap}, vram {vram} GB")
+assert cap[0] >= 8, f"expected Ampere or newer (8.0+), got {cap}. Pick A100 in runtime settings."
+print("good to go")
+        """),
+        md("## 2. Install"),
+        code("""
+!git clone -q https://github.com/krutikmehtaa/silentwall.git 2>/dev/null || (cd silentwall && git pull -q)
+%cd silentwall
+!pip install -q -e .
+!python -m silentwall.cli --version
+        """),
+        md("## 3. Quick sanity check, 60 seconds, no GPU"),
+        code("""
+!python -m silentwall.cli sweep -c configs/smoke.yaml --quiet
+        """),
+        md("""
+Check: `clean_reference` leak 0.000, AUC near 0.5. If either is off, stop.
+        """),
+        md("## 4. See the cost"),
+        code("""
+!python -m silentwall.cli plan -c configs/default.yaml \
+  --set sampling.k=8 \
+  --set method_params.silentwall.regen_retries=4 \
+  --set methods=clean_reference,none,system_prompt,retrieval_filter,refusal_classifier,silentwall
+        """),
+        md("""
+## 5. The run
+
+89,280 generations, six methods, 7B in 4-bit on A100. Roughly **1.5 to 2.5 hours**.
+
+First method downloads about 4 GB of weights, so allow 5 to 10 minutes of startup
+before generation begins. Keep the tab active.
+        """),
+        code("""
+!python -m silentwall.cli sweep -c configs/default.yaml \
+  --set sampling.k=8 \
+  --set method_params.silentwall.regen_retries=4 \
+  --set methods=clean_reference,none,system_prompt,retrieval_filter,refusal_classifier,silentwall \
+  --confirm-budget
+        """),
+        md("## 6. Results"),
+        code("""
+from pathlib import Path
+from IPython.display import Markdown, display
+display(Markdown(Path("outputs/comparison.md").read_text()))
+        """),
+        md("""
+## 7. Checks
+
+Three things to confirm before trusting the numbers.
+        """),
+        code("""
+import json
+from pathlib import Path
+
+results = sorted(Path("outputs").glob("audit_*.json"))
+print(f"methods completed: {len(results)}")
+print()
+
+for p in results:
+    r = json.loads(p.read_text())
+    det = next((d for d in r["detectability"] if d["detector_id"] == "logreg_primary"), None)
+    leaks = [x["leak_at_k"]["point"] for x in r["leak"]]
+    worst = max(leaks) if leaks else 0.0
+    auc = f"{det['auc']['point']:.3f} [{det['auc']['lo']:.3f}, {det['auc']['hi']:.3f}]" if det else "n/a"
+    pairs = det["n_pairs"] if det else 0
+    print(f"{r['method_id']:22s}  leak {worst:.3f}  AUC {auc}  pairs={pairs}")
+
+print()
+# check 1
+cr = next((json.loads(p.read_text()) for p in results if "clean_reference" in p.name), None)
+if cr:
+    worst_cr = max(x["leak_at_k"]["point"] for x in cr["leak"])
+    print(f"CHECK 1 clean_reference leak: {worst_cr:.3f}", "PASS" if worst_cr < 0.01 else "FAIL")
+
+# check 2: logprob features
+for p in results:
+    r = json.loads(p.read_text())
+    det = next((d for d in r["detectability"] if d["detector_id"] == "logreg_primary"), None)
+    if det and det.get("feature_importance"):
+        lp_feats = [k for k in det["feature_importance"] if "entropy" in k or "logprob" in k]
+        print(f"CHECK 2 logprob features: {len(lp_feats)} present", "PASS" if lp_feats else "FAIL")
+        break
+
+# check 3: suppression detectable
+for name in ("refusal_classifier", "system_prompt"):
+    for p in results:
+        r = json.loads(p.read_text())
+        if r["method_id"] == name:
+            det = next((d for d in r["detectability"] if d["detector_id"] == "logreg_primary"), None)
+            if det:
+                auc_v = det["auc"]["point"]
+                print(f"CHECK 3 {name} AUC: {auc_v:.3f}", "PASS" if auc_v > 0.7 else "needs review")
+            break
+        """),
+        md("## 8. Download"),
+        code("""
+!zip -qr silentwall_a100_results.zip outputs cache
+from google.colab import files
+files.download("silentwall_a100_results.zip")
+        """),
+        md("""
+## If it disconnects
+
+Re-run cells 2 and 5. The cache persists on the Colab disk as long as the runtime is
+alive. If the runtime itself died, the cache is gone and it starts fresh, but at A100
+speed that is under 3 hours rather than a problem.
+        """),
+    ])
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     books = {
         "00_colab_run.ipynb": nb_colab(),
+        "00_colab_pro_run.ipynb": nb_colab_pro(),
         "00_kaggle_run.ipynb": nb_kaggle(),
         "01_build_corpus.ipynb": nb_01(),
         "02_probes.ipynb": nb_02(),
