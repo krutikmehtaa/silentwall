@@ -112,7 +112,7 @@ class HfBackend(BaseBackend):
         # generation. Catching it here turns that into one actionable sentence.
         if want_cuda:
             major, minor = torch.cuda.get_device_capability()
-            supported = getattr(torch.cuda, "get_arch_list", list)()
+            supported: list[str] = getattr(torch.cuda, "get_arch_list", list)()
             if major < 7:
                 name = torch.cuda.get_device_name(0)
                 raise ConfigError(
