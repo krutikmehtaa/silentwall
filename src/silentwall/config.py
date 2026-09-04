@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import Any, Literal
 
@@ -130,6 +130,11 @@ class SilentwallConfig:
     split: SplitConfig = SplitConfig()
     stats: StatsConfig = StatsConfig()
     methods: tuple[str, ...] = ("none",)
+    #: Per-method constructor overrides, keyed by method id. Lets a config or a CLI
+    #: override tune one method without a bespoke flag, for example
+    #: method_params.silentwall.regen_retries. Kept a plain mapping rather than typed
+    #: dataclasses because each method takes different parameters.
+    method_params: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     cache_layers: tuple[Path, ...] = (Path("cache"),)
     artifacts_dir: Path = Path("artifacts")
     data_dir: Path = Path("data")
@@ -299,6 +304,7 @@ def config_hash(cfg: SilentwallConfig) -> str:
         cfg.split,
         cfg.stats,
         sorted(cfg.methods),
+        cfg.method_params,
         cfg.max_generations,
         cfg.behavioural_templates,
         cfg.content_probes_per_family,

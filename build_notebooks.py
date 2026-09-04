@@ -623,10 +623,142 @@ Paste the error back into the chat. The likely candidates, in order:
     ])
 
 
+def nb_kaggle() -> dict:
+    """Self-contained Kaggle runner for the 60-pair headline result."""
+    return notebook([
+        md("""
+# SILENTWALL on Kaggle: the headline run
+
+This is the run whose numbers count. 60 restricted companies plus 60 matched controls,
+so 42 evaluation pairs, on a 7B model in 4-bit. The Colab runs proved the machinery
+works on real weights; this is where the result is measured at a sample size that can
+actually resolve it.
+
+**Before you start:**
+
+- Settings, Accelerator, pick **GPU T4 x2** or **P100**. Either is fine.
+- Settings, Internet, switch **on**. Needed once to download model weights.
+- GPU needs phone verification on your account. Do that first if you have not.
+
+Kaggle gives 30 GPU-hours per week. This notebook is built to fit, and to resume across
+sessions if it does not finish in one sitting.
+        """),
+        md("""
+## 1. Confirm the GPU
+        """),
+        code("""
+import torch
+
+print("cuda:", torch.cuda.is_available())
+if torch.cuda.is_available():
+    print("gpu:", torch.cuda.get_device_name(0))
+    print("capability:", torch.cuda.get_device_capability())
+    print("vram:", round(torch.cuda.get_device_properties(0).total_memory / 1e9, 1), "GB")
+        """),
+        md("""
+## 2. Clone and install
+        """),
+        code("""
+!if [ -d /kaggle/working/silentwall/.git ]; then cd /kaggle/working/silentwall && git pull -q && echo pulled; else git clone -q https://github.com/krutikmehtaa/silentwall.git /kaggle/working/silentwall && echo cloned; fi
+%cd /kaggle/working/silentwall
+!pip install -q -e .
+!python -m silentwall.cli --version
+        """),
+        md("""
+## 3. Check the cost before spending it
+
+`plan` generates nothing. It counts the work and projects the time. Read the total
+before running the sweep.
+
+Two settings keep this affordable. `sampling.k=8` halves the generations versus the
+default of 16, and the leak curve up to k=8 is preserved. `silentwall.regen_retries=4`
+keeps the reference defense fast: the retries are batched into one call, but each
+extra candidate is still real compute, so 4 rather than 8 roughly halves its cost while
+the stub curve shows it stays well below the suppression baselines.
+        """),
+        code("""
+!python -m silentwall.cli plan -c configs/default.yaml \\
+  --set sampling.k=8 \\
+  --set methods=clean_reference,none,system_prompt,retrieval_filter,refusal_classifier,silentwall
+        """),
+        md("""
+## 4. Run the sweep
+
+`--confirm-budget` is required because this exceeds the built-in ceiling, which is the
+point: a large run is always a deliberate choice.
+
+If the session ends before this finishes, do not worry. Every generation is cached as
+it is produced. Re-running this exact cell resumes from where it stopped, and section 6
+shows how to carry the cache across separate sessions.
+
+The `silentwall` method regenerates answers and is slower than the others even with the
+batched retries and the lower retry budget. Expect it to take the largest share of the
+time. That is inherent to what it does, not a problem.
+        """),
+        code("""
+!python -m silentwall.cli sweep -c configs/default.yaml \\
+  --set sampling.k=8 \\
+  --set method_params.silentwall.regen_retries=4 \\
+  --set methods=clean_reference,none,system_prompt,retrieval_filter,refusal_classifier,silentwall \\
+  --confirm-budget
+        """),
+        md("""
+## 5. The comparison table
+        """),
+        code("""
+from pathlib import Path
+from IPython.display import Markdown, display
+
+display(Markdown(Path("outputs/comparison.md").read_text()))
+        """),
+        md("""
+The checks that matter at this sample size:
+
+- `clean_reference` should sit near 0.5 with a reasonably tight interval. At 42 pairs it
+  is the control on the instrument, and its landing on chance is what licenses reading
+  every other row as real signal.
+- `refusal_classifier` should be high, leak zero and AUC near 1.0, the clearest
+  statement of the finding.
+- `silentwall` should sit below the suppression baselines. Whether it reaches chance is
+  the open question the retry-budget curve addresses; a value between the baselines and
+  0.5 is the expected and honest outcome.
+        """),
+        md("""
+## 6. Carry the cache to the next session
+
+If the sweep did not finish, save `/kaggle/working/cache` as a Kaggle output dataset.
+Next session, add that dataset as an input and point the config at both layers. The
+earlier layer is read only, the working directory takes new writes, and only the
+unfinished work runs.
+
+```python
+!python -m silentwall.cli sweep -c configs/default.yaml \\
+  --set sampling.k=8 \\
+  --set method_params.silentwall.regen_retries=4 \\
+  --set cache_layers=/kaggle/input/silentwall-cache-1/cache,/kaggle/working/cache \\
+  --set methods=clean_reference,none,system_prompt,retrieval_filter,refusal_classifier,silentwall \\
+  --confirm-budget
+```
+
+Watch the `already cached` percentage in the plan output. If it says 0% when you expect
+otherwise, the layer path is wrong. Stop and fix it, or you pay the quota twice.
+        """),
+        md("""
+## 7. Download everything
+        """),
+        code("""
+!zip -qr silentwall_default_outputs.zip outputs cache
+from IPython.display import FileLink
+FileLink("silentwall_default_outputs.zip")
+        """),
+    ])
+
+
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     books = {
         "00_colab_run.ipynb": nb_colab(),
+        "00_kaggle_run.ipynb": nb_kaggle(),
         "01_build_corpus.ipynb": nb_01(),
         "02_probes.ipynb": nb_02(),
         "03_baselines.ipynb": nb_03(),

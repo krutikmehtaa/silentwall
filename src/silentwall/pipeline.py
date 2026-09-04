@@ -477,7 +477,16 @@ def run_sweep(
     ws = prepare_workspace(cfg, verbose=verbose)
     results: list[AuditResult] = []
     for method_id in cfg.methods:
-        results.append(run_method(ws, method_id, verbose=verbose, confirm_budget=confirm_budget))
+        params = dict(cfg.method_params.get(method_id, {}))
+        results.append(
+            run_method(
+                ws,
+                method_id,
+                verbose=verbose,
+                confirm_budget=confirm_budget,
+                method_params=params,
+            )
+        )
     return results
 
 

@@ -345,12 +345,20 @@ class SilentWallDefense(BaseContainment):
         )
 
     def _regenerate(self, req: GenerationRequest, ctx: EntityContext) -> Generation | None:
-        """Ask the model again with public context only.
+        """Ask the model again with public context only, all candidates in one batch.
 
-        Returns the last candidate even when it still surfaces a protected value, so the
-        caller can redact rather than fabricate. That distinction matters: a redacted
-        real generation keeps genuine logprobs, and genuine logprobs are precisely what
-        the first version of this defense lacked.
+        The resampling is unchanged in behaviour: draw up to (1 + regen_retries)
+        candidates, keep the first that does not surface a protected value, and fall
+        back to the last one for redaction if none are clean. What changed is that the
+        candidates are requested in a single batched call rather than one at a time.
+
+        This matters entirely for speed. A decode step on a memory-bound GPU costs the
+        same whether the batch holds one sequence or many, so issuing eight sequential
+        single-item generations paid the full per-step price eight times over. Batching
+        them makes the retry budget almost free: eight candidates cost about what one
+        did. The statistical effect, and therefore the detectability result, is
+        identical, because we still keep the first clean draw from the same
+        distribution. Only the wall-clock cost falls.
 
         None only when there is no backend attached, which happens in unit tests that
         call post_generate directly.
@@ -358,23 +366,24 @@ class SilentWallDefense(BaseContainment):
         if self._backend is None:
             return None
 
-        attempt = self._public_only_request(req, ctx)
-        last: Generation | None = None
+        budget = 1 + int(self.params["regen_retries"])
+        base = self._public_only_request(req, ctx)
+        candidates_req = [
+            replace(base, sample_index=base.sample_index + i * _REGEN_OFFSET) for i in range(budget)
+        ]
 
-        for _ in range(1 + int(self.params["regen_retries"])):
-            try:
-                produced = self._backend.generate([attempt])
-            except Exception:  # noqa: BLE001 a failed regeneration must not end the run
-                return last
-            if not produced:
-                return last
+        try:
+            produced = self._backend.generate(candidates_req)
+        except Exception:  # noqa: BLE001 a failed regeneration must not end the run
+            return None
+        if not produced:
+            return None
 
-            last = produced[0]
-            if not any(v and v in last.text for v in ctx.protected_values):
-                return last
-            attempt = replace(attempt, sample_index=attempt.sample_index + _REGEN_OFFSET)
-
-        return last
+        for cand in produced:
+            if not any(v and v in cand.text for v in ctx.protected_values):
+                return cand
+        # none came back clean, hand back the last for redaction rather than fabrication
+        return produced[-1]
 
     @staticmethod
     def _redact(text: str, ctx: EntityContext) -> str:
