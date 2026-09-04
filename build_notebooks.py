@@ -659,9 +659,11 @@ if torch.cuda.is_available():
 ## 2. Clone and install
         """),
         code("""
+# Clones or pulls, then installs. bitsandbytes is needed for 4-bit quantization and
+# Kaggle does not ship it the way Colab does.
 !if [ -d /kaggle/working/silentwall/.git ]; then cd /kaggle/working/silentwall && git pull -q && echo pulled; else git clone -q https://github.com/krutikmehtaa/silentwall.git /kaggle/working/silentwall && echo cloned; fi
 %cd /kaggle/working/silentwall
-!pip install -q -e .
+!pip install -q -e . && pip install -q "bitsandbytes>=0.46.1"
 !python -m silentwall.cli --version
         """),
         md("""
