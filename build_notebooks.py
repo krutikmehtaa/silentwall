@@ -484,7 +484,7 @@ enough. No Hugging Face token is needed anywhere: the model is Qwen, which is un
 !if [ -d /content/silentwall/.git ]; then cd /content/silentwall && git pull -q && echo "pulled into existing clone"; else git clone -q https://github.com/krutikmehtaa/silentwall.git /content/silentwall && echo "fresh clone"; fi
 
 %cd /content/silentwall
-!pip install -q -e .
+!pip install -q -e . && pip install -q "bitsandbytes>=0.46.1"
 !python -m silentwall.cli --version
         """),
         md("""
@@ -785,7 +785,7 @@ print("good to go")
         code("""
 !git clone -q https://github.com/krutikmehtaa/silentwall.git 2>/dev/null || (cd silentwall && git pull -q)
 %cd silentwall
-!pip install -q -e .
+!pip install -q -e . && pip install -q "bitsandbytes>=0.46.1"
 !python -m silentwall.cli --version
         """),
         md("## 3. Quick sanity check, 60 seconds, no GPU"),
