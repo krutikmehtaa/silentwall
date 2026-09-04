@@ -106,6 +106,22 @@ class HfBackend(BaseBackend):
                 f"Use tier cpu-0p5b locally, or stub for tests."
             )
 
+        # Fail early and clearly on a card the installed PyTorch cannot use. Recent
+        # torch builds drop compute capabilities below 7.0, so a Kaggle P100 (6.0)
+        # produces a wall of warnings and then a cryptic kernel error deep in
+        # generation. Catching it here turns that into one actionable sentence.
+        if want_cuda:
+            major, minor = torch.cuda.get_device_capability()
+            supported = getattr(torch.cuda, "get_arch_list", list)()
+            if major < 7:
+                name = torch.cuda.get_device_name(0)
+                raise ConfigError(
+                    f"{name} is compute capability {major}.{minor}, which this PyTorch "
+                    f"build does not support (it needs 7.0 or newer, arch list "
+                    f"{supported}). On Kaggle, switch the accelerator to GPU T4 x2, "
+                    f"which is capability 7.5. The P100 will not work with this torch."
+                )
+
         print(f"loading tokenizer for {self.model_id}")
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_id, trust_remote_code=self.trust_remote_code
