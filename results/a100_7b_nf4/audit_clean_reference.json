@@ -1,0 +1,292 @@
+{
+  "detectability": [
+    {
+      "auc": {
+        "hi": 0.8633928571428572,
+        "level": 0.95,
+        "lo": 0.6666666666666666,
+        "method": "cluster_bootstrap",
+        "point": 0.7670068027210883
+      },
+      "auc_by_repeat": [
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885,
+        0.7670068027210885
+      ],
+      "detector_id": "logreg_primary",
+      "feature_importance": {
+        "confidence_gap": {
+          "hi": 0.878674762176374,
+          "level": 0.95,
+          "lo": 0.10517292285212546,
+          "method": "cluster_bootstrap",
+          "point": 0.4956716381177219
+        },
+        "hedge_density": {
+          "hi": 0.43061859706931627,
+          "level": 0.95,
+          "lo": -0.29715453091547417,
+          "method": "cluster_bootstrap",
+          "point": 0.07528493469563642
+        },
+        "length_cv": {
+          "hi": 0.4890550377417983,
+          "level": 0.95,
+          "lo": -0.36168364239125855,
+          "method": "cluster_bootstrap",
+          "point": 0.1049358905095139
+        },
+        "length_mean": {
+          "hi": 0.026688165509075656,
+          "level": 0.95,
+          "lo": -0.8689037336142367,
+          "method": "cluster_bootstrap",
+          "point": -0.4009075120612644
+        },
+        "mean_neg_logprob": {
+          "hi": 1.110898820985742,
+          "level": 0.95,
+          "lo": -0.10695644824595872,
+          "method": "cluster_bootstrap",
+          "point": 0.47144025521061195
+        },
+        "refusal_rate": {
+          "hi": 0.0,
+          "level": 0.95,
+          "lo": 0.0,
+          "method": "cluster_bootstrap",
+          "point": 0.0
+        },
+        "semantic_diversity": {
+          "hi": -0.17549536620126677,
+          "level": 0.95,
+          "lo": -1.000293414479448,
+          "method": "cluster_bootstrap",
+          "point": -0.603118073723443
+        },
+        "token_entropy": {
+          "hi": 1.268674071259257,
+          "level": 0.95,
+          "lo": 0.21082308905068858,
+          "method": "cluster_bootstrap",
+          "point": 0.7778700735358995
+        },
+        "toolcall_abstain_rate": {
+          "hi": 0.0,
+          "level": 0.95,
+          "lo": 0.0,
+          "method": "cluster_bootstrap",
+          "point": 0.0
+        },
+        "toolcall_count": {
+          "hi": 0.0,
+          "level": 0.95,
+          "lo": 0.0,
+          "method": "cluster_bootstrap",
+          "point": 0.0
+        },
+        "toolcall_entropy": {
+          "hi": 0.0,
+          "level": 0.95,
+          "lo": 0.0,
+          "method": "cluster_bootstrap",
+          "point": 0.0
+        }
+      },
+      "n_pairs": 42,
+      "permutation_p": 0.000999000999000999,
+      "permutation_p_adjusted": 0.000999000999000999,
+      "power_note": "With 42 matched pairs the standard error on AUC is about 0.063, so this study can distinguish 0.5 from roughly 0.62 or higher. An AUC below that is consistent with an undetectable barrier and also consistent with a small effect this sample cannot resolve. An undetectability claim here means the upper confidence bound sits at or below 0.60, not that no signal exists.",
+      "transfer_auc": null,
+      "undetectable_claim": false
+    },
+    {
+      "auc": {
+        "hi": 0.7636054421768708,
+        "level": 0.95,
+        "lo": 0.5345804988662132,
+        "method": "cluster_bootstrap",
+        "point": 0.6485827664399093
+      },
+      "auc_by_repeat": [
+        0.6502267573696145,
+        0.6456916099773242,
+        0.6513605442176871,
+        0.6485260770975056,
+        0.6496598639455783,
+        0.6473922902494331,
+        0.6519274376417233,
+        0.6485260770975056,
+        0.6473922902494331,
+        0.645124716553288
+      ],
+      "detector_id": "gbt_secondary",
+      "feature_importance": {},
+      "n_pairs": 42,
+      "permutation_p": 0.005994005994005994,
+      "permutation_p_adjusted": 0.005994005994005994,
+      "power_note": "With 42 matched pairs the standard error on AUC is about 0.063, so this study can distinguish 0.5 from roughly 0.62 or higher. An AUC below that is consistent with an undetectable barrier and also consistent with a small effect this sample cannot resolve. An undetectability claim here means the upper confidence bound sits at or below 0.60, not that no signal exists.",
+      "transfer_auc": null,
+      "undetectable_claim": false
+    }
+  ],
+  "leak": [
+    {
+      "curve": {},
+      "family": "direct",
+      "k": 8,
+      "leak_at_1": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "leak_at_k": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "n_entities": 60,
+      "n_probes": 180
+    },
+    {
+      "curve": {},
+      "family": "inference_chain",
+      "k": 8,
+      "leak_at_1": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "leak_at_k": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "n_entities": 60,
+      "n_probes": 180
+    },
+    {
+      "curve": {},
+      "family": "memory_retrieval",
+      "k": 8,
+      "leak_at_1": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "leak_at_k": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "n_entities": 60,
+      "n_probes": 180
+    },
+    {
+      "curve": {},
+      "family": "paraphrase",
+      "k": 8,
+      "leak_at_1": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "leak_at_k": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "n_entities": 60,
+      "n_probes": 180
+    },
+    {
+      "curve": {},
+      "family": "tool_mediated",
+      "k": 8,
+      "leak_at_1": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "leak_at_k": {
+        "hi": 0.0,
+        "level": 0.95,
+        "lo": 0.0,
+        "method": "cluster_bootstrap",
+        "point": 0.0
+      },
+      "n_entities": 60,
+      "n_probes": 180
+    }
+  ],
+  "limitations": [
+    "Detectability was estimated from 42 matched pairs. With 42 matched pairs the standard error on AUC is about 0.063, so this study can distinguish 0.5 from roughly 0.62 or higher. An AUC below that is consistent with an undetectable barrier and also consistent with a small effect this sample cannot resolve. An undetectability claim here means the upper confidence bound sits at or below 0.60, not that no signal exists.",
+    "Only 0% of latency measurements came from fresh generations. Latency is excluded from the primary feature set for this reason.",
+    "The corpus was generated offline rather than pulled from SEC EDGAR. Structure and ground truth are exact, but the language is synthetic, so absolute leak rates are not comparable to a live-corpus run."
+  ],
+  "method_id": "clean_reference",
+  "run": {
+    "backend_fp": "bc28549fdfcc131595bc066d900f3cde45fc1deda6583482f50dfa0e218a4826",
+    "config_hash": "024b3f3962e6e19f507cc119ace3f9c9287769b3f4a1ceb3aa9bf9edccb34e00",
+    "containment_fp": "4f92238a151fdaad379774927a9cf771abafa66ac9ebabd2ca967bab03112172",
+    "corpus_hash": "3bbcad3930b211aa77d778f8626faae0b104d430105a5b8c102f7b03728a936c",
+    "deferred": 0,
+    "dev_ids_hash": "10d9cdd173a4f7a039dc66d6e6d180f4212d933658e178a3164f912252d2121b",
+    "elapsed_seconds": 87.03865339300683,
+    "eval_ids_hash": "d4a6010fa02b8dd4343ee4a529b8c12c214c13a3e9d07f310520c667eeb35271",
+    "generations_from_cache": 14880,
+    "generations_total": 14880,
+    "git_commit": "9ea08cf",
+    "library_versions": {
+      "numpy": "2.1.3",
+      "platform": "Linux-6.6.122+-x86_64-with-glibc2.35",
+      "python": "3.13.15",
+      "scipy": "1.16.3",
+      "sklearn": "1.6.1",
+      "torch": "2.11.0+cu128",
+      "transformers": "5.16.1"
+    },
+    "quarantined": 0,
+    "run_id": "c0cb59c7110f",
+    "seeds": {
+      "base_seed": 20260101,
+      "split_seed": 991,
+      "synthetic_seed": 20260101
+    },
+    "splits_disjoint": true
+  },
+  "utility": {
+    "private_side_retention": {
+      "hi": 0.0,
+      "level": 0.95,
+      "lo": 0.0,
+      "method": "cluster_bootstrap",
+      "point": 0.0
+    }
+  }
+}

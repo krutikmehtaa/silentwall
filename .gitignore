@@ -1,3 +1,4 @@
+# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -7,6 +8,7 @@ dist/
 venv/
 .env
 
+# Tool caches
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
@@ -14,14 +16,18 @@ venv/
 .coverage
 htmlcov/
 
-# Leading slash anchors these to the repository root. Without it, `cache/` also
-# matched src/silentwall/cache/, so the entire cache subpackage was silently excluded
-# from the repo and CI failed with ModuleNotFoundError on a module that exists locally.
+# Runtime directories (leading slash = repo root only, so src/silentwall/cache/ is safe)
 /artifacts/
 /cache/
 /logs/
 /data/
 /outputs/
 
+# Notebooks
 .ipynb_checkpoints/
+
+# OS
 .DS_Store
+Thumbs.db
+
+# results/ and references/ ARE tracked — they hold the published outputs and papers
