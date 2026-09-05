@@ -266,7 +266,7 @@ being observable is itself a failure.
 
 ## Author
 
-**Krutik Mehta** — MS Computer Science, UT Austin (Fall 2025)
+**Krutik Mehta**
 
 ## License
 
